@@ -5,40 +5,29 @@ extern crate lazy_static;
 extern crate anyhow;
 
 use args::Command;
-use chrono::Local;
 use clap::Parser;
 use ipmi::{Cmd, Ipmi, IpmiTool};
 use log::{error, info};
-use std::{io::Write, ops::RangeInclusive};
+use std::ops::RangeInclusive;
 use tokio::time::{self, Duration};
+use pretty_env_logger;
+use crate::fan_curve::fan_speed;
+
+use ringbuf::HeapRb;
 
 mod args;
 mod ipmi;
+mod fan_curve;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    pretty_env_logger::init();
+
     let args = args::Args::parse();
 
-    let mut level = log::LevelFilter::Debug;
-
-    if args.verbose {
-        level = log::LevelFilter::Trace;
-    }
-
-    env_logger::Builder::new()
-        .format(|buf, record| {
-            writeln!(
-                buf,
-                "{} {} {}",
-                Local::now().format("%Y-%m-%dT%H:%M:%S%.3f"),
-                record.level(),
-                record.args()
-            )
-        })
-        .filter_level(level)
-        .init();
-
     let tool = IpmiTool::new(Box::new(Cmd::new()));
+
+    info!("Starting IPMI Fan Control tool!");
 
     match args.command {
         Command::Auto(a) => {
@@ -47,6 +36,8 @@ async fn main() {
                 interval = 5;
                 info!("invalid interval, interval set to 5");
             }
+
+            let mut ring = HeapRb::new(a.samples_average as usize);
 
             let mut threshold = a.threshold;
             if !RangeInclusive::new(60, 100).contains(&threshold) {
@@ -68,16 +59,7 @@ async fn main() {
 
                 if let Ok(temperature) = tool.get_cpu_temperature() {
                     // transfer temperature to fan speed
-                    let mut speed = match temperature {
-                        0..=40 => 0,
-                        41..=50 => 2,
-                        51..=55 => 10,
-                        56..=60 => 30,
-                        61..=62 => 40,
-                        63..=65 => 50,
-                        66..=70 => 90,
-                        71.. => 100,
-                    };
+                    let mut speed = fan_speed(temperature, &mut ring);
 
                     if temperature >= threshold {
                         speed = 100;

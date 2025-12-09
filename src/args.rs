@@ -34,6 +34,10 @@ pub struct Auto {
     #[arg(short, long, default_value = "5")]
     pub interval: u64,
 
+    /// Optional temperature samples to average. Use 1 to disable
+    #[arg(short, long, default_value = "5")]
+    pub samples_average: i32,
+
     /// threshold CPU temperature for full speed Fan, default 70 (degrees), accepted value range [60-100]
     #[arg(short, long, default_value = "70")]
     pub threshold: u16,
